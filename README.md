@@ -38,8 +38,12 @@ paper-trading mode, optional Go/Rust/TypeScript components, and Render-ready dep
 MyTradingAgent is designed to:
 
 - analyze market candles using a baseline multi-factor strategy;
+- reject bad market data through a fail-closed data-quality gate;
+- produce alpha confluence cards from independent transparent voters;
 - produce transparent research reports with regime, volatility, confidence, and risk notes;
 - rank multiple markets through a scanner workflow;
+- run lightweight walk-forward backtests as sanity diagnostics;
+- monitor statistical black-swan anomalies before trade planning;
 - build trade plans only when a signal passes risk checks;
 - send trade plans to Telegram for human approval;
 - execute approved orders through an exchange adapter;
@@ -47,6 +51,8 @@ MyTradingAgent is designed to:
 - cap leverage at a hard maximum of `20x`;
 - enforce portfolio, symbol, and open-position exposure limits;
 - keep an append-only JSONL audit trail for approvals, rejections, kill-switch events, and executions;
+- compute a tamper-evident audit hash root;
+- scan named market universes such as majors, Solana, AI, DeFi, and hybrid markets;
 - provide a clean foundation for future research, broker adapters, and strategy modules.
 
 The current default strategy is intentionally simple and inspectable. It combines EMA trend crossover,
@@ -98,9 +104,14 @@ Telegram Bot Commands
     v
 Trading Engine
     |-- Market Data Adapter
+    |-- Data Quality Gate
+    |-- Alpha Confluence Engine
+    |-- Black-Swan Sentinel
     |-- Strategy / Signal Engine
+    |-- Research / Backtest Diagnostics
     |-- Risk Engine
     |-- Approval Book
+    |-- Audit Hash Chain
     |-- Execution Engine
     |
     v
@@ -111,11 +122,13 @@ Core flow:
 
 1. User sends `/scan BTC/USDT`.
 2. Bot fetches OHLCV candles.
-3. Strategy analyzes the market.
-4. Risk engine builds or rejects a trade plan.
-5. Bot sends a Telegram approval request.
-6. User sends `/approve <id>`.
-7. Execution engine submits the order to paper mode or Bitget live mode.
+3. Data-quality gate checks candle integrity.
+4. Black-swan sentinel checks anomaly conditions.
+5. Strategy analyzes the market.
+6. Risk engine builds or rejects a trade plan.
+7. Bot sends a Telegram approval request.
+8. User sends `/approve <id>`.
+9. Execution engine submits the order to paper mode or Bitget live mode.
 
 ---
 
@@ -131,8 +144,13 @@ Core flow:
 - Paper trading exchange.
 - Bitget adapter using CCXT.
 - Multi-factor baseline analysis engine.
+- Fail-closed candle data-quality gate.
+- Alpha confluence card with transparent voter breakdown.
 - Institutional research report layer.
 - Multi-symbol market scanner.
+- Named universe scanner.
+- Black-swan statistical sentinel with auto-halt recommendation.
+- Lightweight walk-forward backtester.
 - Portfolio exposure dashboard.
 - ATR-based stop-loss and take-profit planning.
 - Dynamic leverage calculation.
@@ -143,6 +161,7 @@ Core flow:
 - Daily loss guard.
 - Stop-loss requirement gate.
 - Append-only JSONL audit journal.
+- Tamper-evident audit hash-chain root command.
 - SQLite trade-plan storage adapter.
 - Supabase REST storage adapter scaffold.
 - Render Docker deployment support.
@@ -198,8 +217,14 @@ Examples:
 | `/start` | Shows bot intro and command list |
 | `/status` | Shows trading mode, approval mode, leverage cap, pending approvals |
 | `/research BTC/USDT` | Produces an institutional-style research report |
+| `/alpha BTC/USDT` | Produces an alpha confluence card with voter reasons |
+| `/sentinel BTC/USDT` | Runs black-swan anomaly checks; can auto-halt on critical severity |
+| `/backtest BTC/USDT` | Runs a lightweight walk-forward sanity backtest |
 | `/scan BTC/USDT` | Analyzes a symbol and creates a trade plan when actionable |
 | `/scan_many BTC/USDT ETH/USDT SOL/USDT` | Ranks symbols by research score |
+| `/scan_many solana` | Ranks a named universe |
+| `/universe` | Lists named universes |
+| `/audit_root` | Shows JSONL audit validity and tamper-evident hash root |
 | `/portfolio` | Shows equity, gross exposure, net exposure, leverage, and positions |
 | `/risk` | Shows active risk limits |
 | `/pending` | Lists pending approval requests |
@@ -489,7 +514,11 @@ app/
   main.py                   Application entrypoint
   telegram_bot.py           Telegram commands and approval workflow
   core/
+    alpha.py                Transparent alpha confluence engine
+    attestation.py          Tamper-evident audit hash-chain root
     audit.py                Append-only JSONL audit journal
+    backtest.py             Lightweight walk-forward backtesting diagnostics
+    data_quality.py         Fail-closed candle integrity checks
     execution.py            Approval book and execution engine
     indicators.py           EMA, SMA, RSI, ATR helpers
     models.py               Trading models and enums
@@ -497,7 +526,9 @@ app/
     research.py             Institutional research and regime scoring layer
     risk.py                 Risk engine and leverage controls
     scanner.py              Multi-symbol research scanner
+    sentinel.py             Black-swan anomaly sentinel
     strategy.py             Baseline multi-factor strategy
+    universe.py             Named market universes
   exchanges/
     base.py                 Exchange interface
     bitget.py               Bitget/CCXT live adapter
@@ -519,6 +550,8 @@ deployment/
   render.md                 Render deployment checklist
 
 tests/
+  test_execution.py         Approval expiry tests
+  test_institutional_layers.py Data quality, alpha, sentinel, attestation tests
   test_risk.py              Risk-engine unit tests
 ```
 
@@ -561,14 +594,17 @@ Potential next engineering milestones:
 - exchange market discovery and symbol validation;
 - real account balance and position dashboard;
 - persistent order/approval history;
-- backtesting engine;
-- walk-forward strategy validation;
-- portfolio-level exposure constraints;
-- volatility regime detection;
+- full portfolio backtesting engine with shared capital;
+- walk-forward optimization and out-of-sample validation;
+- correlation-aware portfolio exposure constraints;
+- advanced volatility-regime model;
 - event-driven risk daemon;
 - VaR / expected shortfall research module;
 - pre-trade slippage and liquidity checks;
 - post-trade performance attribution;
+- cryptographic Ed25519 signatures for audit batches;
+- exchange websocket ingestion and order-book analytics;
+- authenticated web control plane with read-only investor dashboard;
 - news and sentiment research adapters;
 - performance analytics;
 - broker adapters for non-Bitget assets;

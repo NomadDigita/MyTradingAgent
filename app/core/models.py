@@ -33,6 +33,13 @@ class Regime(StrEnum):
     UNKNOWN = "unknown"
 
 
+class AlertLevel(StrEnum):
+    INFO = "info"
+    WATCH = "watch"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
 @dataclass(frozen=True)
 class Candle:
     timestamp: int
@@ -111,3 +118,51 @@ class ResearchReport:
     last_price: float
     risk_notes: list[str]
     rationale: list[str]
+
+
+@dataclass(frozen=True)
+class DataQualityReport:
+    symbol: str
+    score: float
+    valid: bool
+    issues: list[str]
+    candle_count: int
+
+
+@dataclass(frozen=True)
+class AlphaVote:
+    name: str
+    direction: float
+    confidence: float
+    reason: str
+
+
+@dataclass(frozen=True)
+class AlphaCard:
+    symbol: str
+    score: float
+    action: SignalAction
+    confidence: float
+    votes: list[AlphaVote]
+    data_quality: DataQualityReport
+
+
+@dataclass(frozen=True)
+class SentinelAlert:
+    symbol: str
+    level: AlertLevel
+    severity: float
+    halt_recommended: bool
+    triggers: list[str]
+
+
+@dataclass(frozen=True)
+class BacktestMetrics:
+    symbol: str
+    trades: int
+    win_rate: float
+    total_return: float
+    max_drawdown: float
+    profit_factor: float
+    expectancy: float
+    sharpe_like: float

@@ -4,14 +4,19 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from app.config import Settings
+from app.core.alpha import AlphaConfluenceEngine
+from app.core.attestation import AuditHashChain
 from app.core.audit import AuditJournal
+from app.core.backtest import LightweightBacktester
 from app.core.execution import ApprovalBook, ExecutionEngine
 from app.core.models import ExecutionResult
 from app.core.portfolio import PortfolioSnapshot
 from app.core.research import InstitutionalResearchEngine
 from app.core.risk import RiskConfig, RiskEngine, RiskState
 from app.core.scanner import MarketScanner
+from app.core.sentinel import BlackSwanSentinel
 from app.core.strategy import MultiFactorStrategy
+from app.core.universe import resolve_universe, universe_menu
 from app.exchanges.base import Exchange
 from app.exchanges.bitget import BitgetExchange
 from app.exchanges.paper import PaperExchange
@@ -62,6 +67,10 @@ def build_application(settings: Settings) -> Application:
     strategy = MultiFactorStrategy()
     research = InstitutionalResearchEngine()
     scanner = MarketScanner(exchange, research)
+    alpha = AlphaConfluenceEngine()
+    sentinel = BlackSwanSentinel()
+    backtester = LightweightBacktester(alpha)
+    hash_chain = AuditHashChain()
 
     app = Application.builder().token(settings.telegram_bot_token).build()
     app.bot_data["settings"] = settings
@@ -73,6 +82,10 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["strategy"] = strategy
     app.bot_data["research"] = research
     app.bot_data["scanner"] = scanner
+    app.bot_data["alpha"] = alpha
+    app.bot_data["sentinel"] = sentinel
+    app.bot_data["backtester"] = backtester
+    app.bot_data["hash_chain"] = hash_chain
     app.bot_data["trading_halted"] = False
 
     app.add_handler(CommandHandler("start", start))
@@ -80,7 +93,12 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("scan", scan))
     app.add_handler(CommandHandler("research", research_command))
+    app.add_handler(CommandHandler("alpha", alpha_command))
+    app.add_handler(CommandHandler("sentinel", sentinel_command))
+    app.add_handler(CommandHandler("backtest", backtest_command))
     app.add_handler(CommandHandler("scan_many", scan_many))
+    app.add_handler(CommandHandler("universe", universe_command))
+    app.add_handler(CommandHandler("audit_root", audit_root))
     app.add_handler(CommandHandler("portfolio", portfolio))
     app.add_handler(CommandHandler("risk", risk))
     app.add_handler(CommandHandler("halt", halt))
@@ -102,8 +120,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Core:",
                 "/status - operating mode and pending approvals",
                 "/research SYMBOL - detailed research report",
+                "/alpha SYMBOL - confluence alpha card",
+                "/sentinel SYMBOL - black-swan anomaly check",
+                "/backtest SYMBOL - lightweight walk-forward sanity test",
                 "/scan SYMBOL - create a risk-checked approval plan",
-                "/scan_many SYMBOL1 SYMBOL2 - rank multiple symbols",
+                "/scan_many SYMBOL1 SYMBOL2 - rank symbols or a named universe",
+                "/universe - list named universes",
+                "/audit_root - tamper-evident audit hash root",
                 "/portfolio - exposure and open positions",
                 "/risk - active limits and kill-switch state",
                 "/pending - pending approvals",
@@ -148,8 +171,24 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     strategy: MultiFactorStrategy = context.bot_data["strategy"]
     risk_engine: RiskEngine = context.bot_data["risk_engine"]
     execution_engine: ExecutionEngine = context.bot_data["execution_engine"]
+    alpha: AlphaConfluenceEngine = context.bot_data["alpha"]
+    sentinel: BlackSwanSentinel = context.bot_data["sentinel"]
 
     candles = await exchange.fetch_ohlcv(symbol)
+    alpha_card = alpha.card(symbol, candles)
+    if not alpha_card.data_quality.valid:
+        await update.effective_message.reply_text(
+            "Data-quality gate rejected scan.\n" + "\n".join(alpha_card.data_quality.issues)
+        )
+        return
+    alert = sentinel.evaluate(symbol, candles)
+    if alert.halt_recommended:
+        context.bot_data["trading_halted"] = True
+        audit: AuditJournal = context.bot_data["audit"]
+        audit.record("sentinel_auto_halt", {"symbol": symbol, "alert": alert})
+        await update.effective_message.reply_text(_format_sentinel(alert))
+        return
+
     market_type = await exchange.market_type(symbol)
     signal = strategy.analyze(symbol, candles, market_type)
     state = await _risk_state(context)
@@ -192,7 +231,7 @@ async def scan_many(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     settings: Settings = context.bot_data["settings"]
-    symbols = [arg.upper() for arg in context.args] if context.args else settings.default_scan_symbols
+    symbols = resolve_universe(context.args) if context.args else settings.default_scan_symbols
     scanner: MarketScanner = context.bot_data["scanner"]
     reports = await scanner.scan(symbols)
     lines = ["Market scanner ranking:"]
@@ -202,6 +241,90 @@ async def scan_many(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"confidence={report.confidence:.3f} regime={report.regime.value}"
         )
     await update.effective_message.reply_text("\n".join(lines))
+
+
+async def alpha_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /alpha BTC/USDT")
+        return
+    symbol = context.args[0].upper()
+    exchange: Exchange = context.bot_data["exchange"]
+    alpha: AlphaConfluenceEngine = context.bot_data["alpha"]
+    candles = await exchange.fetch_ohlcv(symbol)
+    card = alpha.card(symbol, candles)
+    await update.effective_message.reply_text(_format_alpha(card))
+
+
+async def sentinel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /sentinel BTC/USDT")
+        return
+    symbol = context.args[0].upper()
+    exchange: Exchange = context.bot_data["exchange"]
+    sentinel: BlackSwanSentinel = context.bot_data["sentinel"]
+    candles = await exchange.fetch_ohlcv(symbol)
+    alert = sentinel.evaluate(symbol, candles)
+    if alert.halt_recommended:
+        context.bot_data["trading_halted"] = True
+        audit: AuditJournal = context.bot_data["audit"]
+        audit.record("sentinel_auto_halt", {"symbol": symbol, "alert": alert})
+    await update.effective_message.reply_text(_format_sentinel(alert))
+
+
+async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /backtest BTC/USDT")
+        return
+    symbol = context.args[0].upper()
+    exchange: Exchange = context.bot_data["exchange"]
+    backtester: LightweightBacktester = context.bot_data["backtester"]
+    candles = await exchange.fetch_ohlcv(symbol, limit=240)
+    metrics = backtester.run(symbol, candles)
+    await update.effective_message.reply_text(
+        "\n".join(
+            [
+                f"Backtest sanity check: {metrics.symbol}",
+                f"Trades: {metrics.trades}",
+                f"Win rate: {metrics.win_rate:.2%}",
+                f"Total return: {metrics.total_return:.2%}",
+                f"Max drawdown: {metrics.max_drawdown:.2%}",
+                f"Profit factor: {metrics.profit_factor:.3f}",
+                f"Expectancy: {metrics.expectancy:.5f}",
+                f"Sharpe-like: {metrics.sharpe_like:.3f}",
+                "Use this as a diagnostic only, not proof of future profitability.",
+            ]
+        )
+    )
+
+
+async def universe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    await update.effective_message.reply_text("Available universes:\n" + universe_menu())
+
+
+async def audit_root(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    settings: Settings = context.bot_data["settings"]
+    hash_chain: AuditHashChain = context.bot_data["hash_chain"]
+    root = hash_chain.root(settings.audit_log_path)
+    valid = hash_chain.verify_jsonl(settings.audit_log_path)
+    await update.effective_message.reply_text(
+        "\n".join(
+            [
+                "Audit attestation:",
+                f"JSONL valid: {valid}",
+                f"Hash root: {root}",
+            ]
+        )
+    )
 
 
 async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -367,6 +490,40 @@ def _format_report(report) -> str:
             "",
             "Rationale:",
             *[f"- {item}" for item in report.rationale[:10]],
+        ]
+    )
+
+
+def _format_alpha(card) -> str:
+    lines = [
+        f"Alpha confluence card: {card.symbol}",
+        f"Action: {card.action.value}",
+        f"Score: {card.score:.4f}",
+        f"Confidence: {card.confidence:.4f}",
+        f"Data quality: {card.data_quality.score:.3f} valid={card.data_quality.valid}",
+        "",
+        "Data quality notes:",
+        *[f"- {item}" for item in card.data_quality.issues],
+    ]
+    if card.votes:
+        lines.extend(["", "Votes:"])
+        for vote in card.votes:
+            lines.append(
+                f"- {vote.name}: direction={vote.direction:.2f} "
+                f"confidence={vote.confidence:.2f}; {vote.reason}"
+            )
+    return "\n".join(lines)
+
+
+def _format_sentinel(alert) -> str:
+    return "\n".join(
+        [
+            f"Black-swan sentinel: {alert.symbol}",
+            f"Level: {alert.level.value}",
+            f"Severity: {alert.severity:.3f}",
+            f"Halt recommended: {alert.halt_recommended}",
+            "Triggers:",
+            *[f"- {item}" for item in alert.triggers],
         ]
     )
 
