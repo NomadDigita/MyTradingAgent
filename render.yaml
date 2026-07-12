@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: my-trading-agent
+    env: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: TRADING_MODE
+        value: paper
+      - key: APPROVAL_REQUIRED
+        value: "true"
+      - key: MAX_LEVERAGE
+        value: "20"
