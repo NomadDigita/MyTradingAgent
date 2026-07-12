@@ -166,3 +166,67 @@ class BacktestMetrics:
     profit_factor: float
     expectancy: float
     sharpe_like: float
+
+
+@dataclass(frozen=True)
+class RiskMetric:
+    name: str
+    value: float
+    limit: float
+    passed: bool
+    note: str
+
+
+@dataclass(frozen=True)
+class SlippageEstimate:
+    symbol: str
+    notional: float
+    estimated_bps: float
+    liquidity_score: float
+    notes: list[str]
+
+
+@dataclass(frozen=True)
+class OrderSlice:
+    index: int
+    amount: float
+    notional: float
+    delay_seconds: int
+    order_type: str
+
+
+@dataclass(frozen=True)
+class OrderRoute:
+    symbol: str
+    total_amount: float
+    total_notional: float
+    style: str
+    slices: list[OrderSlice]
+    slippage: SlippageEstimate
+    notes: list[str]
+
+
+@dataclass(frozen=True)
+class ComplianceDecision:
+    symbol: str
+    approved: bool
+    score: float
+    metrics: list[RiskMetric]
+    blockers: list[str]
+    warnings: list[str]
+
+
+@dataclass(frozen=True)
+class AgentFinding:
+    agent: str
+    status: str
+    summary: str
+    severity: float
+
+
+@dataclass(frozen=True)
+class SwarmReport:
+    symbol: str
+    decision: str
+    findings: list[AgentFinding]
+    recommended_actions: list[str]

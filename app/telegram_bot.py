@@ -8,14 +8,18 @@ from app.core.alpha import AlphaConfluenceEngine
 from app.core.attestation import AuditHashChain
 from app.core.audit import AuditJournal
 from app.core.backtest import LightweightBacktester
+from app.core.compliance import PreTradeComplianceEngine
 from app.core.execution import ApprovalBook, ExecutionEngine
 from app.core.models import ExecutionResult
+from app.core.order_router import SmartOrderRouter
+from app.core.playbook import IncidentPlaybook
 from app.core.portfolio import PortfolioSnapshot
 from app.core.research import InstitutionalResearchEngine
 from app.core.risk import RiskConfig, RiskEngine, RiskState
 from app.core.scanner import MarketScanner
 from app.core.sentinel import BlackSwanSentinel
 from app.core.strategy import MultiFactorStrategy
+from app.core.swarm import TradingSwarm
 from app.core.universe import resolve_universe, universe_menu
 from app.exchanges.base import Exchange
 from app.exchanges.bitget import BitgetExchange
@@ -71,6 +75,10 @@ def build_application(settings: Settings) -> Application:
     sentinel = BlackSwanSentinel()
     backtester = LightweightBacktester(alpha)
     hash_chain = AuditHashChain()
+    compliance = PreTradeComplianceEngine()
+    router = SmartOrderRouter()
+    swarm = TradingSwarm()
+    playbooks = IncidentPlaybook()
 
     app = Application.builder().token(settings.telegram_bot_token).build()
     app.bot_data["settings"] = settings
@@ -86,6 +94,10 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["sentinel"] = sentinel
     app.bot_data["backtester"] = backtester
     app.bot_data["hash_chain"] = hash_chain
+    app.bot_data["compliance"] = compliance
+    app.bot_data["router"] = router
+    app.bot_data["swarm"] = swarm
+    app.bot_data["playbooks"] = playbooks
     app.bot_data["trading_halted"] = False
 
     app.add_handler(CommandHandler("start", start))
@@ -96,6 +108,10 @@ def build_application(settings: Settings) -> Application:
     app.add_handler(CommandHandler("alpha", alpha_command))
     app.add_handler(CommandHandler("sentinel", sentinel_command))
     app.add_handler(CommandHandler("backtest", backtest_command))
+    app.add_handler(CommandHandler("preflight", preflight_command))
+    app.add_handler(CommandHandler("route", route_command))
+    app.add_handler(CommandHandler("swarm", swarm_command))
+    app.add_handler(CommandHandler("playbook", playbook_command))
     app.add_handler(CommandHandler("scan_many", scan_many))
     app.add_handler(CommandHandler("universe", universe_command))
     app.add_handler(CommandHandler("audit_root", audit_root))
@@ -123,6 +139,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "/alpha SYMBOL - confluence alpha card",
                 "/sentinel SYMBOL - black-swan anomaly check",
                 "/backtest SYMBOL - lightweight walk-forward sanity test",
+                "/preflight SYMBOL - full institutional pre-trade compliance check",
+                "/route SYMBOL - smart execution route preview for a generated plan",
+                "/swarm SYMBOL - specialist-agent debate report",
+                "/playbook NAME - operational incident playbook",
                 "/scan SYMBOL - create a risk-checked approval plan",
                 "/scan_many SYMBOL1 SYMBOL2 - rank symbols or a named universe",
                 "/universe - list named universes",
@@ -303,6 +323,60 @@ async def backtest_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
 
 
+async def preflight_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /preflight BTC/USDT")
+        return
+    built = await _build_plan(context, context.args[0].upper())
+    if isinstance(built, str):
+        await update.effective_message.reply_text(built)
+        return
+    plan, candles, state = built
+    compliance: PreTradeComplianceEngine = context.bot_data["compliance"]
+    decision = compliance.check(plan, candles, state.equity, state.open_positions or [])
+    await update.effective_message.reply_text(_format_compliance(decision))
+
+
+async def route_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /route BTC/USDT")
+        return
+    built = await _build_plan(context, context.args[0].upper())
+    if isinstance(built, str):
+        await update.effective_message.reply_text(built)
+        return
+    plan, candles, _state = built
+    router: SmartOrderRouter = context.bot_data["router"]
+    route = router.route(plan, candles)
+    await update.effective_message.reply_text(_format_route(route))
+
+
+async def swarm_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /swarm BTC/USDT")
+        return
+    symbol = context.args[0].upper()
+    exchange: Exchange = context.bot_data["exchange"]
+    swarm: TradingSwarm = context.bot_data["swarm"]
+    candles = await exchange.fetch_ohlcv(symbol, limit=240)
+    report = swarm.debate(symbol, candles)
+    await update.effective_message.reply_text(_format_swarm(report))
+
+
+async def playbook_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    playbooks: IncidentPlaybook = context.bot_data["playbooks"]
+    name = context.args[0] if context.args else ""
+    await update.effective_message.reply_text(playbooks.render(name))
+
+
 async def universe_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
@@ -453,6 +527,31 @@ async def _risk_state(context: ContextTypes.DEFAULT_TYPE) -> RiskState:
     )
 
 
+async def _build_plan(context: ContextTypes.DEFAULT_TYPE, symbol: str):
+    exchange: Exchange = context.bot_data["exchange"]
+    strategy: MultiFactorStrategy = context.bot_data["strategy"]
+    risk_engine: RiskEngine = context.bot_data["risk_engine"]
+    alpha: AlphaConfluenceEngine = context.bot_data["alpha"]
+    sentinel: BlackSwanSentinel = context.bot_data["sentinel"]
+    candles = await exchange.fetch_ohlcv(symbol)
+    alpha_card = alpha.card(symbol, candles)
+    if not alpha_card.data_quality.valid:
+        return "Data-quality gate rejected plan.\n" + "\n".join(alpha_card.data_quality.issues)
+    alert = sentinel.evaluate(symbol, candles)
+    if alert.halt_recommended:
+        return _format_sentinel(alert)
+    market_type = await exchange.market_type(symbol)
+    signal = strategy.analyze(symbol, candles, market_type)
+    state = await _risk_state(context)
+    plan = risk_engine.build_plan(signal, state)
+    if plan is None:
+        return "No risk-approved trade plan.\n" + "\n".join(signal.rationale)
+    errors = risk_engine.validate_plan(plan, state)
+    if errors:
+        return "Risk rejected plan: " + "; ".join(errors)
+    return plan, candles, state
+
+
 def _format_plan(plan: str, text_plan) -> str:
     return "\n".join(
         [
@@ -526,6 +625,62 @@ def _format_sentinel(alert) -> str:
             *[f"- {item}" for item in alert.triggers],
         ]
     )
+
+
+def _format_compliance(decision) -> str:
+    lines = [
+        f"Pre-trade compliance: {decision.symbol}",
+        f"Approved: {decision.approved}",
+        f"Score: {decision.score:.3f}",
+    ]
+    if decision.blockers:
+        lines.extend(["", "Blockers:", *[f"- {item}" for item in decision.blockers]])
+    if decision.warnings:
+        lines.extend(["", "Warnings:", *[f"- {item}" for item in decision.warnings]])
+    lines.append("")
+    lines.append("Metrics:")
+    for metric in decision.metrics:
+        lines.append(
+            f"- {metric.name}: value={metric.value:.4f} limit={metric.limit:.4f} "
+            f"passed={metric.passed}; {metric.note}"
+        )
+    return "\n".join(lines)
+
+
+def _format_route(route) -> str:
+    lines = [
+        f"Smart route: {route.symbol}",
+        f"Style: {route.style}",
+        f"Total notional: {route.total_notional:.2f}",
+        f"Estimated slippage: {route.slippage.estimated_bps:.2f} bps",
+        f"Liquidity score: {route.slippage.liquidity_score:.3f}",
+        "Notes:",
+        *[f"- {item}" for item in route.notes + route.slippage.notes],
+        "",
+        "Slices:",
+    ]
+    for item in route.slices:
+        lines.append(
+            f"- #{item.index} amount={item.amount} notional={item.notional:.2f} "
+            f"delay={item.delay_seconds}s type={item.order_type}"
+        )
+    return "\n".join(lines)
+
+
+def _format_swarm(report) -> str:
+    lines = [
+        f"Swarm debate: {report.symbol}",
+        f"Decision: {report.decision}",
+        "",
+        "Findings:",
+    ]
+    for finding in report.findings:
+        lines.append(
+            f"- {finding.agent}: status={finding.status} severity={finding.severity:.3f}; "
+            f"{finding.summary}"
+        )
+    lines.extend(["", "Recommended actions:", *[f"- {item}" for item in report.recommended_actions]])
+    return "\n".join(lines)
 
 
 def _format_execution(result: ExecutionResult) -> str:

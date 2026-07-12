@@ -44,6 +44,10 @@ MyTradingAgent is designed to:
 - rank multiple markets through a scanner workflow;
 - run lightweight walk-forward backtests as sanity diagnostics;
 - monitor statistical black-swan anomalies before trade planning;
+- run portfolio VaR, correlation, slippage, and liquidity preflight checks;
+- preview smart execution routes with defensive TWAP slicing;
+- generate internal specialist-agent swarm debate reports;
+- provide operational incident playbooks;
 - build trade plans only when a signal passes risk checks;
 - send trade plans to Telegram for human approval;
 - execute approved orders through an exchange adapter;
@@ -110,6 +114,9 @@ Trading Engine
     |-- Strategy / Signal Engine
     |-- Research / Backtest Diagnostics
     |-- Risk Engine
+    |-- Compliance / VaR / Correlation / Slippage
+    |-- Smart Order Router
+    |-- Swarm Triage
     |-- Approval Book
     |-- Audit Hash Chain
     |-- Execution Engine
@@ -126,9 +133,11 @@ Core flow:
 4. Black-swan sentinel checks anomaly conditions.
 5. Strategy analyzes the market.
 6. Risk engine builds or rejects a trade plan.
-7. Bot sends a Telegram approval request.
-8. User sends `/approve <id>`.
-9. Execution engine submits the order to paper mode or Bitget live mode.
+7. Optional `/preflight` validates VaR, correlation, liquidity, slippage, data, and anomaly gates.
+8. Optional `/route` previews market-impact-aware order slicing.
+9. Bot sends a Telegram approval request.
+10. User sends `/approve <id>`.
+11. Execution engine submits the order to paper mode or Bitget live mode.
 
 ---
 
@@ -151,6 +160,13 @@ Core flow:
 - Named universe scanner.
 - Black-swan statistical sentinel with auto-halt recommendation.
 - Lightweight walk-forward backtester.
+- Portfolio VaR gate.
+- Correlation concentration gate.
+- Liquidity and slippage estimator.
+- Smart execution router with TWAP slicing preview.
+- Pre-trade compliance aggregator.
+- In-process specialist-agent swarm triage.
+- Operational incident playbooks.
 - Portfolio exposure dashboard.
 - ATR-based stop-loss and take-profit planning.
 - Dynamic leverage calculation.
@@ -220,6 +236,11 @@ Examples:
 | `/alpha BTC/USDT` | Produces an alpha confluence card with voter reasons |
 | `/sentinel BTC/USDT` | Runs black-swan anomaly checks; can auto-halt on critical severity |
 | `/backtest BTC/USDT` | Runs a lightweight walk-forward sanity backtest |
+| `/preflight BTC/USDT` | Runs institutional pre-trade compliance checks |
+| `/route BTC/USDT` | Previews a smart execution route for a generated plan |
+| `/swarm BTC/USDT` | Runs an internal specialist-agent debate report |
+| `/playbook` | Lists operational incident playbooks |
+| `/playbook black_swan` | Shows a specific incident runbook |
 | `/scan BTC/USDT` | Analyzes a symbol and creates a trade plan when actionable |
 | `/scan_many BTC/USDT ETH/USDT SOL/USDT` | Ranks symbols by research score |
 | `/scan_many solana` | Ranks a named universe |
@@ -518,17 +539,24 @@ app/
     attestation.py          Tamper-evident audit hash-chain root
     audit.py                Append-only JSONL audit journal
     backtest.py             Lightweight walk-forward backtesting diagnostics
+    compliance.py           Aggregated pre-trade compliance gate
+    correlation.py          Correlation and concentration risk helpers
     data_quality.py         Fail-closed candle integrity checks
     execution.py            Approval book and execution engine
     indicators.py           EMA, SMA, RSI, ATR helpers
     models.py               Trading models and enums
+    order_router.py         Smart order-routing and slicing preview
+    playbook.py             Operational incident playbooks
     portfolio.py            Portfolio exposure snapshot helpers
     research.py             Institutional research and regime scoring layer
     risk.py                 Risk engine and leverage controls
     scanner.py              Multi-symbol research scanner
     sentinel.py             Black-swan anomaly sentinel
+    slippage.py             Liquidity and slippage estimator
     strategy.py             Baseline multi-factor strategy
+    swarm.py                In-process specialist-agent debate reports
     universe.py             Named market universes
+    var.py                  Portfolio VaR checks
   exchanges/
     base.py                 Exchange interface
     bitget.py               Bitget/CCXT live adapter
@@ -552,6 +580,7 @@ deployment/
 tests/
   test_execution.py         Approval expiry tests
   test_institutional_layers.py Data quality, alpha, sentinel, attestation tests
+  test_platform_layers.py   VaR, slippage, routing, compliance, swarm tests
   test_risk.py              Risk-engine unit tests
 ```
 
