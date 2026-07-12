@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from app.core.models import Candle, ExecutionResult, MarketType, TradePlan
+from app.core.models import Candle, ExecutionResult, MarketType, Position, Side, TradePlan
 from app.exchanges.base import Exchange
 
 
@@ -81,6 +81,35 @@ class BitgetExchange(Exchange):
         if usdt is None:
             return 0.0
         return float(usdt)
+
+    async def open_positions(self) -> list[Position]:
+        if not getattr(self._exchange, "has", {}).get("fetchPositions"):
+            return []
+        rows = await asyncio.to_thread(self._exchange.fetch_positions)
+        positions: list[Position] = []
+        for row in rows:
+            contracts = float(row.get("contracts") or row.get("contractSize") or 0)
+            if contracts == 0:
+                continue
+            side_raw = str(row.get("side") or "").lower()
+            side = Side.SELL if side_raw == "short" else Side.BUY
+            mark = float(row.get("markPrice") or row.get("lastPrice") or row.get("entryPrice") or 0)
+            entry = float(row.get("entryPrice") or mark or 0)
+            leverage = float(row.get("leverage") or 1)
+            symbol = str(row.get("symbol") or "")
+            market_type = await self.market_type(symbol) if symbol else MarketType.SWAP
+            positions.append(
+                Position(
+                    symbol=symbol,
+                    side=side,
+                    amount=contracts if side == Side.BUY else -contracts,
+                    entry_price=entry,
+                    mark_price=mark,
+                    leverage=leverage,
+                    market_type=market_type,
+                )
+            )
+        return positions
 
     async def market_type(self, symbol: str) -> MarketType:
         markets = await asyncio.to_thread(self._exchange.load_markets)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
+from app.core.audit import AuditJournal
 from app.core.models import ExecutionResult, TradePlan
 from app.exchanges.base import Exchange
 
@@ -9,31 +11,71 @@ from app.exchanges.base import Exchange
 @dataclass
 class ApprovalBook:
     pending: dict[str, TradePlan] = field(default_factory=dict)
+    expiry_minutes: int = 15
 
     def add(self, plan: TradePlan) -> str:
         self.pending[plan.approval_id] = plan
         return plan.approval_id
 
     def pop(self, approval_id: str) -> TradePlan | None:
-        return self.pending.pop(approval_id, None)
+        plan = self.pending.pop(approval_id, None)
+        if plan is None:
+            return None
+        if datetime.now(UTC) - plan.created_at > timedelta(minutes=self.expiry_minutes):
+            return None
+        return plan
 
     def reject(self, approval_id: str) -> bool:
         return self.pending.pop(approval_id, None) is not None
 
+    def prune_expired(self) -> list[str]:
+        now = datetime.now(UTC)
+        expired = [
+            approval_id
+            for approval_id, plan in self.pending.items()
+            if now - plan.created_at > timedelta(minutes=self.expiry_minutes)
+        ]
+        for approval_id in expired:
+            self.pending.pop(approval_id, None)
+        return expired
+
 
 class ExecutionEngine:
-    def __init__(self, exchange: Exchange, approval_book: ApprovalBook, approval_required: bool) -> None:
+    def __init__(
+        self,
+        exchange: Exchange,
+        approval_book: ApprovalBook,
+        approval_required: bool,
+        audit: AuditJournal | None = None,
+    ) -> None:
         self.exchange = exchange
         self.approval_book = approval_book
         self.approval_required = approval_required
+        self.audit = audit
 
     async def submit(self, plan: TradePlan) -> ExecutionResult | str:
         if self.approval_required:
-            return self.approval_book.add(plan)
-        return await self.exchange.create_order(plan)
+            approval_id = self.approval_book.add(plan)
+            self._record("approval_created", {"approval_id": approval_id, "plan": plan})
+            return approval_id
+        result = await self.exchange.create_order(plan)
+        self._record("order_executed_without_approval", {"plan": plan, "result": result})
+        return result
 
     async def approve(self, approval_id: str) -> ExecutionResult | None:
         plan = self.approval_book.pop(approval_id)
         if plan is None:
+            self._record("approval_missing_or_expired", {"approval_id": approval_id})
             return None
-        return await self.exchange.create_order(plan)
+        result = await self.exchange.create_order(plan)
+        self._record("approval_executed", {"approval_id": approval_id, "plan": plan, "result": result})
+        return result
+
+    def reject(self, approval_id: str) -> bool:
+        rejected = self.approval_book.reject(approval_id)
+        self._record("approval_rejected", {"approval_id": approval_id, "rejected": rejected})
+        return rejected
+
+    def _record(self, event_type: str, payload: dict) -> None:
+        if self.audit is not None:
+            self.audit.record(event_type, payload)

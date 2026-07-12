@@ -14,7 +14,16 @@ class MultiFactorStrategy:
     def analyze(self, symbol: str, candles: list[Candle], market_type: MarketType) -> Signal:
         if len(candles) < 60:
             last = candles[-1].close if candles else 0.0
-            return Signal(symbol, SignalAction.FLAT, 0.0, ["Not enough candles"], None, None, last)
+            return Signal(
+                symbol,
+                SignalAction.FLAT,
+                0.0,
+                ["Not enough candles"],
+                None,
+                None,
+                last,
+                market_type,
+            )
 
         closes = [c.close for c in candles]
         ema_fast = ema(closes, 12)

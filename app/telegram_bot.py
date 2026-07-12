@@ -4,9 +4,13 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from app.config import Settings
+from app.core.audit import AuditJournal
 from app.core.execution import ApprovalBook, ExecutionEngine
 from app.core.models import ExecutionResult
+from app.core.portfolio import PortfolioSnapshot
+from app.core.research import InstitutionalResearchEngine
 from app.core.risk import RiskConfig, RiskEngine, RiskState
+from app.core.scanner import MarketScanner
 from app.core.strategy import MultiFactorStrategy
 from app.exchanges.base import Exchange
 from app.exchanges.bitget import BitgetExchange
@@ -39,29 +43,48 @@ def build_application(settings: Settings) -> Application:
     else:
         exchange = PaperExchange()
 
-    approval_book = ApprovalBook()
+    audit = AuditJournal(settings.audit_log_path)
+    approval_book = ApprovalBook(expiry_minutes=settings.approval_expiry_minutes)
     risk_engine = RiskEngine(
         RiskConfig(
             max_leverage=settings.max_leverage,
             default_risk_per_trade=settings.default_risk_per_trade,
             max_notional_per_trade=settings.max_notional_per_trade,
             max_daily_loss=settings.max_daily_loss,
+            max_open_positions=settings.max_open_positions,
+            max_symbol_notional=settings.max_symbol_notional,
+            max_portfolio_notional=settings.max_portfolio_notional,
+            min_signal_confidence=settings.min_signal_confidence,
+            require_stop_loss=settings.require_stop_loss,
         )
     )
-    execution_engine = ExecutionEngine(exchange, approval_book, settings.approval_required)
+    execution_engine = ExecutionEngine(exchange, approval_book, settings.approval_required, audit)
     strategy = MultiFactorStrategy()
+    research = InstitutionalResearchEngine()
+    scanner = MarketScanner(exchange, research)
 
     app = Application.builder().token(settings.telegram_bot_token).build()
     app.bot_data["settings"] = settings
     app.bot_data["exchange"] = exchange
+    app.bot_data["audit"] = audit
     app.bot_data["approval_book"] = approval_book
     app.bot_data["risk_engine"] = risk_engine
     app.bot_data["execution_engine"] = execution_engine
     app.bot_data["strategy"] = strategy
+    app.bot_data["research"] = research
+    app.bot_data["scanner"] = scanner
+    app.bot_data["trading_halted"] = False
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("scan", scan))
+    app.add_handler(CommandHandler("research", research_command))
+    app.add_handler(CommandHandler("scan_many", scan_many))
+    app.add_handler(CommandHandler("portfolio", portfolio))
+    app.add_handler(CommandHandler("risk", risk))
+    app.add_handler(CommandHandler("halt", halt))
+    app.add_handler(CommandHandler("resume", resume))
     app.add_handler(CommandHandler("pending", pending))
     app.add_handler(CommandHandler("approve", approve))
     app.add_handler(CommandHandler("reject", reject))
@@ -72,7 +95,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await _authorized(update, context):
         return
     await update.effective_message.reply_text(
-        "MyTradingAgent is online. Use /status, /scan SYMBOL, /pending, /approve ID, /reject ID."
+        "\n".join(
+            [
+                "MyTradingAgent institutional command center is online.",
+                "",
+                "Core:",
+                "/status - operating mode and pending approvals",
+                "/research SYMBOL - detailed research report",
+                "/scan SYMBOL - create a risk-checked approval plan",
+                "/scan_many SYMBOL1 SYMBOL2 - rank multiple symbols",
+                "/portfolio - exposure and open positions",
+                "/risk - active limits and kill-switch state",
+                "/pending - pending approvals",
+                "/approve ID - approve and execute",
+                "/reject ID - reject approval",
+                "/halt - activate operator kill switch",
+                "/resume - deactivate operator kill switch",
+            ]
+        )
     )
 
 
@@ -81,13 +121,16 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     settings: Settings = context.bot_data["settings"]
     approval_book: ApprovalBook = context.bot_data["approval_book"]
+    expired = approval_book.prune_expired()
     await update.effective_message.reply_text(
         "\n".join(
             [
                 f"Mode: {settings.trading_mode}",
                 f"Approval required: {settings.approval_required}",
                 f"Max leverage: {settings.max_leverage}x",
+                f"Trading halted: {context.bot_data['trading_halted']}",
                 f"Pending approvals: {len(approval_book.pending)}",
+                f"Expired approvals pruned: {len(expired)}",
             ]
         )
     )
@@ -109,8 +152,8 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     candles = await exchange.fetch_ohlcv(symbol)
     market_type = await exchange.market_type(symbol)
     signal = strategy.analyze(symbol, candles, market_type)
-    equity = await exchange.equity()
-    plan = risk_engine.build_plan(signal, RiskState(equity=equity))
+    state = await _risk_state(context)
+    plan = risk_engine.build_plan(signal, state)
 
     if plan is None:
         await update.effective_message.reply_text(
@@ -118,7 +161,7 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    errors = risk_engine.validate_plan(plan)
+    errors = risk_engine.validate_plan(plan, state)
     if errors:
         await update.effective_message.reply_text("Risk rejected plan: " + "; ".join(errors))
         return
@@ -128,6 +171,96 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(_format_plan(plan=result, text_plan=plan))
     else:
         await update.effective_message.reply_text(_format_execution(result))
+
+
+async def research_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    if not context.args:
+        await update.effective_message.reply_text("Usage: /research BTC/USDT")
+        return
+    symbol = context.args[0].upper()
+    exchange: Exchange = context.bot_data["exchange"]
+    research_engine: InstitutionalResearchEngine = context.bot_data["research"]
+    candles = await exchange.fetch_ohlcv(symbol)
+    market_type = await exchange.market_type(symbol)
+    report = research_engine.report(symbol, candles, market_type)
+    await update.effective_message.reply_text(_format_report(report))
+
+
+async def scan_many(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    settings: Settings = context.bot_data["settings"]
+    symbols = [arg.upper() for arg in context.args] if context.args else settings.default_scan_symbols
+    scanner: MarketScanner = context.bot_data["scanner"]
+    reports = await scanner.scan(symbols)
+    lines = ["Market scanner ranking:"]
+    for index, report in enumerate(reports[:10], start=1):
+        lines.append(
+            f"{index}. {report.symbol} score={report.score:.3f} action={report.action.value} "
+            f"confidence={report.confidence:.3f} regime={report.regime.value}"
+        )
+    await update.effective_message.reply_text("\n".join(lines))
+
+
+async def portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    exchange: Exchange = context.bot_data["exchange"]
+    snapshot = PortfolioSnapshot(await exchange.equity(), await exchange.open_positions())
+    lines = ["Portfolio snapshot:", *snapshot.risk_summary()]
+    if snapshot.positions:
+        lines.append("")
+        lines.append("Positions:")
+        for position in snapshot.positions[:20]:
+            lines.append(
+                f"- {position.symbol} {position.side.value} amount={position.amount:.8f} "
+                f"notional={position.notional:.2f} lev={position.leverage}x"
+            )
+    await update.effective_message.reply_text("\n".join(lines))
+
+
+async def risk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    risk_engine: RiskEngine = context.bot_data["risk_engine"]
+    config = risk_engine.config
+    await update.effective_message.reply_text(
+        "\n".join(
+            [
+                "Risk limits:",
+                f"Trading halted: {context.bot_data['trading_halted']}",
+                f"Max leverage: {config.max_leverage}x",
+                f"Min signal confidence: {config.min_signal_confidence}",
+                f"Risk per trade: {config.default_risk_per_trade}",
+                f"Max notional per trade: {config.max_notional_per_trade}",
+                f"Max symbol notional: {config.max_symbol_notional}",
+                f"Max portfolio notional: {config.max_portfolio_notional}",
+                f"Max open positions: {config.max_open_positions}",
+                f"Max daily loss: {config.max_daily_loss}",
+                f"Require stop loss: {config.require_stop_loss}",
+            ]
+        )
+    )
+
+
+async def halt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    context.bot_data["trading_halted"] = True
+    audit: AuditJournal = context.bot_data["audit"]
+    audit.record("operator_halt", {"user_id": update.effective_user.id if update.effective_user else None})
+    await update.effective_message.reply_text("Operator kill switch activated. New trade plans are blocked.")
+
+
+async def resume(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _authorized(update, context):
+        return
+    context.bot_data["trading_halted"] = False
+    audit: AuditJournal = context.bot_data["audit"]
+    audit.record("operator_resume", {"user_id": update.effective_user.id if update.effective_user else None})
+    await update.effective_message.reply_text("Operator kill switch cleared. Risk checks remain active.")
 
 
 async def pending(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -166,8 +299,8 @@ async def reject(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
         await update.effective_message.reply_text("Usage: /reject <id>")
         return
-    approval_book: ApprovalBook = context.bot_data["approval_book"]
-    if approval_book.reject(context.args[0]):
+    execution_engine: ExecutionEngine = context.bot_data["execution_engine"]
+    if execution_engine.reject(context.args[0]):
         await update.effective_message.reply_text("Rejected.")
     else:
         await update.effective_message.reply_text("Approval id not found.")
@@ -187,6 +320,16 @@ async def _authorized(update: Update, context: ContextTypes.DEFAULT_TYPE) -> boo
     return True
 
 
+async def _risk_state(context: ContextTypes.DEFAULT_TYPE) -> RiskState:
+    exchange: Exchange = context.bot_data["exchange"]
+    return RiskState(
+        equity=await exchange.equity(),
+        realized_pnl_today=0.0,
+        open_positions=await exchange.open_positions(),
+        trading_halted=bool(context.bot_data["trading_halted"]),
+    )
+
+
 def _format_plan(plan: str, text_plan) -> str:
     return "\n".join(
         [
@@ -200,9 +343,30 @@ def _format_plan(plan: str, text_plan) -> str:
             f"Leverage: {text_plan.leverage}x",
             f"Stop loss: {text_plan.stop_loss}",
             f"Take profit: {text_plan.take_profit}",
+            f"Approval expires in configured window.",
             "Rationale:",
             *[f"- {item}" for item in text_plan.rationale],
             f"Approve with /approve {plan}",
+        ]
+    )
+
+
+def _format_report(report) -> str:
+    return "\n".join(
+        [
+            f"Research report: {report.symbol}",
+            f"Action: {report.action.value}",
+            f"Score: {report.score:.3f}",
+            f"Confidence: {report.confidence:.3f}",
+            f"Regime: {report.regime.value}",
+            f"Last price: {report.last_price:.6f}",
+            f"Realized volatility: {report.volatility:.4f}",
+            "",
+            "Risk notes:",
+            *[f"- {item}" for item in report.risk_notes],
+            "",
+            "Rationale:",
+            *[f"- {item}" for item in report.rationale[:10]],
         ]
     )
 

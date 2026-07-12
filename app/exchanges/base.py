@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from app.core.models import Candle, ExecutionResult, MarketType, TradePlan
+from app.core.models import Candle, ExecutionResult, MarketType, Position, TradePlan
 
 
 class Exchange(ABC):
@@ -18,6 +18,10 @@ class Exchange(ABC):
 
     @abstractmethod
     async def equity(self) -> float:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def open_positions(self) -> list[Position]:
         raise NotImplementedError
 
     @abstractmethod

@@ -16,6 +16,14 @@ class Settings:
     default_risk_per_trade: float
     max_notional_per_trade: float
     max_daily_loss: float
+    max_open_positions: int
+    max_symbol_notional: float
+    max_portfolio_notional: float
+    min_signal_confidence: float
+    require_stop_loss: bool
+    approval_expiry_minutes: int
+    default_scan_symbols: list[str]
+    audit_log_path: str
     bitget_api_key: str | None
     bitget_api_secret: str | None
     bitget_api_password: str | None
@@ -45,6 +53,14 @@ class Settings:
             default_risk_per_trade=float(os.getenv("DEFAULT_RISK_PER_TRADE", "0.005")),
             max_notional_per_trade=float(os.getenv("MAX_NOTIONAL_PER_TRADE", "100")),
             max_daily_loss=float(os.getenv("MAX_DAILY_LOSS", "50")),
+            max_open_positions=int(os.getenv("MAX_OPEN_POSITIONS", "5")),
+            max_symbol_notional=float(os.getenv("MAX_SYMBOL_NOTIONAL", "250")),
+            max_portfolio_notional=float(os.getenv("MAX_PORTFOLIO_NOTIONAL", "500")),
+            min_signal_confidence=float(os.getenv("MIN_SIGNAL_CONFIDENCE", "0.55")),
+            require_stop_loss=_bool("REQUIRE_STOP_LOSS", True),
+            approval_expiry_minutes=int(os.getenv("APPROVAL_EXPIRY_MINUTES", "15")),
+            default_scan_symbols=_csv("DEFAULT_SCAN_SYMBOLS", ["BTC/USDT", "ETH/USDT", "SOL/USDT"]),
+            audit_log_path=os.getenv("AUDIT_LOG_PATH", "logs/audit.jsonl"),
             bitget_api_key=os.getenv("BITGET_API_KEY") or None,
             bitget_api_secret=os.getenv("BITGET_API_SECRET") or None,
             bitget_api_password=os.getenv("BITGET_API_PASSWORD") or None,
@@ -64,3 +80,10 @@ def _bool(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _csv(name: str, default: list[str]) -> list[str]:
+    value = os.getenv(name)
+    if not value:
+        return default
+    return [item.strip().upper() for item in value.split(",") if item.strip()]

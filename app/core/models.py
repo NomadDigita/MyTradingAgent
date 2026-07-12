@@ -25,6 +25,14 @@ class SignalAction(StrEnum):
     FLAT = "flat"
 
 
+class Regime(StrEnum):
+    TREND_UP = "trend_up"
+    TREND_DOWN = "trend_down"
+    RANGE = "range"
+    HIGH_VOLATILITY = "high_volatility"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class Candle:
     timestamp: int
@@ -75,3 +83,31 @@ class ExecutionResult:
     amount: float
     order_id: str | None = None
     message: str = ""
+
+
+@dataclass(frozen=True)
+class Position:
+    symbol: str
+    side: Side
+    amount: float
+    entry_price: float
+    mark_price: float
+    leverage: float = 1.0
+    market_type: MarketType = MarketType.SPOT
+
+    @property
+    def notional(self) -> float:
+        return abs(self.amount * self.mark_price)
+
+
+@dataclass(frozen=True)
+class ResearchReport:
+    symbol: str
+    action: SignalAction
+    confidence: float
+    regime: Regime
+    volatility: float
+    score: float
+    last_price: float
+    risk_notes: list[str]
+    rationale: list[str]

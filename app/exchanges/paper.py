@@ -4,7 +4,7 @@ import itertools
 import random
 import time
 
-from app.core.models import Candle, ExecutionResult, MarketType, TradePlan
+from app.core.models import Candle, ExecutionResult, MarketType, Position, Side, TradePlan
 from app.exchanges.base import Exchange
 
 
@@ -12,6 +12,7 @@ class PaperExchange(Exchange):
     def __init__(self, starting_equity: float = 10_000.0) -> None:
         self._equity = starting_equity
         self._ids = itertools.count(1)
+        self._positions: list[Position] = []
 
     async def fetch_ohlcv(
         self, symbol: str, timeframe: str = "1h", limit: int = 120
@@ -41,6 +42,18 @@ class PaperExchange(Exchange):
         return candles
 
     async def create_order(self, plan: TradePlan) -> ExecutionResult:
+        signed_amount = plan.amount if plan.side == Side.BUY else -plan.amount
+        self._positions.append(
+            Position(
+                symbol=plan.symbol,
+                side=plan.side,
+                amount=signed_amount,
+                entry_price=plan.entry_price,
+                mark_price=plan.entry_price,
+                leverage=plan.leverage,
+                market_type=plan.market_type,
+            )
+        )
         return ExecutionResult(
             ok=True,
             mode="paper",
@@ -53,6 +66,9 @@ class PaperExchange(Exchange):
 
     async def equity(self) -> float:
         return self._equity
+
+    async def open_positions(self) -> list[Position]:
+        return list(self._positions)
 
     async def market_type(self, symbol: str) -> MarketType:
         if ":" in symbol or symbol.endswith(".P"):
