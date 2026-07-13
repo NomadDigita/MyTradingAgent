@@ -317,12 +317,28 @@ Do not commit `.env`, API keys, Telegram bot tokens, GitHub tokens, Supabase ser
 | `BITGET_API_SECRET` | Live only | empty | Bitget API secret |
 | `BITGET_API_PASSWORD` | Live only | empty | Bitget API passphrase/password |
 | `BITGET_SANDBOX` | Optional | `false` | Enables Bitget sandbox mode when supported |
-| `DATABASE_URL` | Optional | `sqlite:///data/trading_agent.sqlite` | SQLite database URL |
-| `SUPABASE_URL` | Optional | empty | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Optional | empty | Supabase service role key; keep server-side only |
-| `RISK_SERVICE_URL` | Optional | empty | Optional Go risk service base URL |
+| `DATABASE_URL` | Optional | `sqlite:///data/trading_agent.sqlite` | Local app DB URL. Keep SQLite unless a PostgreSQL persistence layer is wired |
+| `SUPABASE_URL` | Optional | empty | Supabase Project URL / API URL |
+| `SUPABASE_PUBLISHABLE_KEY` | Optional | empty | Supabase publishable/anon key; mainly for frontend clients |
+| `SUPABASE_SECRET_KEY` | Optional | empty | Supabase secret/service-role key for server-side REST persistence |
+| `SUPABASE_SERVICE_ROLE_KEY` | Optional | empty | Backward-compatible alias for `SUPABASE_SECRET_KEY` |
+| `SUPABASE_DIRECT_DATABASE_URL` | Optional | empty | Supabase direct Postgres connection string; not the same as `DATABASE_URL` in the default bot |
+| `RISK_SERVICE_URL` | Optional | empty | Optional Go risk service URL if `services/risk-go` is deployed separately |
 | `AUDIT_LOG_PATH` | Optional | `logs/audit.jsonl` | Append-only local audit log |
 | `LOG_LEVEL` | Optional | `INFO` | Python logging level |
+
+### Supabase field mapping
+
+Supabase has several different values that look similar. Use them like this:
+
+| Supabase dashboard label | Put it in | Needed now? | Notes |
+| --- | --- | --- | --- |
+| Project URL / API URL | `SUPABASE_URL` | Optional | Looks like `https://your-project.supabase.co` |
+| Publishable key / anon key | `SUPABASE_PUBLISHABLE_KEY` | Usually no | Mainly for browser/frontend clients |
+| Secret key / service_role key | `SUPABASE_SECRET_KEY` | Yes, if using Supabase REST storage | Server-side only. Do not expose in frontend code |
+| Direct connection string | `SUPABASE_DIRECT_DATABASE_URL` | Not by default | Direct Postgres URL. Kept separate from the default SQLite `DATABASE_URL` |
+
+`RISK_SERVICE_URL` is unrelated to Supabase. Leave it blank unless you deploy the optional Go risk microservice in `services/risk-go`; then set it to that service’s internal URL.
 
 ---
 
@@ -357,7 +373,10 @@ BITGET_SANDBOX=false
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
 SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_DIRECT_DATABASE_URL=
 RISK_SERVICE_URL=
 AUDIT_LOG_PATH=logs/audit.jsonl
 LOG_LEVEL=INFO
@@ -390,7 +409,10 @@ BITGET_SANDBOX=false
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
 SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_DIRECT_DATABASE_URL=
 RISK_SERVICE_URL=
 AUDIT_LOG_PATH=logs/audit.jsonl
 LOG_LEVEL=INFO
@@ -423,7 +445,10 @@ BITGET_SANDBOX=true
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
 SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_DIRECT_DATABASE_URL=
 RISK_SERVICE_URL=
 AUDIT_LOG_PATH=logs/audit.jsonl
 LOG_LEVEL=INFO
@@ -456,7 +481,10 @@ BITGET_SANDBOX=false
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
 SUPABASE_URL=
+SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_DIRECT_DATABASE_URL=
 RISK_SERVICE_URL=
 AUDIT_LOG_PATH=logs/audit.jsonl
 LOG_LEVEL=INFO
@@ -489,7 +517,10 @@ BITGET_SANDBOX=false
 
 DATABASE_URL=
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=replace_with_service_role_key
+SUPABASE_PUBLISHABLE_KEY=replace_with_publishable_or_anon_key
+SUPABASE_SECRET_KEY=replace_with_secret_or_service_role_key
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_DIRECT_DATABASE_URL=postgresql://postgres.your-ref:password@aws-0-region.pooler.supabase.com:6543/postgres
 RISK_SERVICE_URL=
 AUDIT_LOG_PATH=logs/audit.jsonl
 LOG_LEVEL=INFO

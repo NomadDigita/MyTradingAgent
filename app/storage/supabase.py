@@ -8,11 +8,11 @@ from app.core.models import TradePlan
 
 
 class SupabaseTradeStore:
-    def __init__(self, url: str, service_role_key: str) -> None:
+    def __init__(self, url: str, secret_key: str) -> None:
         self.url = url.rstrip("/")
         self.headers = {
-            "apikey": service_role_key,
-            "authorization": f"Bearer {service_role_key}",
+            "apikey": secret_key,
+            "authorization": f"Bearer {secret_key}",
             "content-type": "application/json",
         }
 

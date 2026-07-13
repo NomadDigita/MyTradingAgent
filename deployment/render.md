@@ -34,6 +34,19 @@ Only add these after paper mode has been tested:
 - `DEFAULT_SCAN_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT`
 - `AUDIT_LOG_PATH=logs/audit.jsonl`
 
+## Supabase variables
+
+These are optional. If you only want local SQLite persistence, leave them blank.
+
+- Supabase **Project URL / API URL** -> `SUPABASE_URL`
+- Supabase **Publishable key / anon key** -> `SUPABASE_PUBLISHABLE_KEY`
+- Supabase **Secret key / service_role key** -> `SUPABASE_SECRET_KEY`
+- Supabase **Direct connection string** -> `SUPABASE_DIRECT_DATABASE_URL`
+
+The default `DATABASE_URL=sqlite:///data/trading_agent.sqlite` is for the app’s local SQLite storage. Do not paste the Supabase direct connection string into `DATABASE_URL` unless a Postgres persistence implementation is added.
+
+`RISK_SERVICE_URL` is not from Supabase. It is only for the optional Go service in `services/risk-go`.
+
 ## Notes
 
 Render needs a web process with a health endpoint. The bot runs Telegram polling and exposes `/healthz` on port `10000`.

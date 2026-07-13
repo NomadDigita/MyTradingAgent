@@ -29,6 +29,10 @@ class Settings:
     bitget_api_password: str | None
     bitget_sandbox: bool
     database_url: str
+    supabase_url: str | None
+    supabase_publishable_key: str | None
+    supabase_secret_key: str | None
+    supabase_direct_database_url: str | None
     risk_service_url: str | None
     log_level: str
 
@@ -66,6 +70,18 @@ class Settings:
             bitget_api_password=os.getenv("BITGET_API_PASSWORD") or None,
             bitget_sandbox=_bool("BITGET_SANDBOX", False),
             database_url=os.getenv("DATABASE_URL", "sqlite:///data/trading_agent.sqlite"),
+            supabase_url=os.getenv("SUPABASE_URL") or None,
+            supabase_publishable_key=(
+                os.getenv("SUPABASE_PUBLISHABLE_KEY")
+                or os.getenv("SUPABASE_ANON_KEY")
+                or None
+            ),
+            supabase_secret_key=(
+                os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+                or os.getenv("SUPABASE_SECRET_KEY")
+                or None
+            ),
+            supabase_direct_database_url=os.getenv("SUPABASE_DIRECT_DATABASE_URL") or None,
             risk_service_url=os.getenv("RISK_SERVICE_URL") or None,
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         )
