@@ -28,6 +28,7 @@ class Settings:
     bitget_api_secret: str | None
     bitget_api_password: str | None
     bitget_sandbox: bool
+    storage_backend: str
     database_url: str
     supabase_url: str | None
     supabase_publishable_key: str | None
@@ -69,6 +70,7 @@ class Settings:
             bitget_api_secret=os.getenv("BITGET_API_SECRET") or None,
             bitget_api_password=os.getenv("BITGET_API_PASSWORD") or None,
             bitget_sandbox=_bool("BITGET_SANDBOX", False),
+            storage_backend=os.getenv("STORAGE_BACKEND", "sqlite").strip().lower(),
             database_url=os.getenv("DATABASE_URL", "sqlite:///data/trading_agent.sqlite"),
             supabase_url=os.getenv("SUPABASE_URL") or None,
             supabase_publishable_key=(

@@ -38,14 +38,22 @@ Only add these after paper mode has been tested:
 
 These are optional. If you only want local SQLite persistence, leave them blank.
 
+- Storage backend -> `STORAGE_BACKEND`
 - Supabase **Project URL / API URL** -> `SUPABASE_URL`
 - Supabase **Publishable key / anon key** -> `SUPABASE_PUBLISHABLE_KEY`
 - Supabase **Secret key / service_role key** -> `SUPABASE_SECRET_KEY`
 - Supabase **Direct connection string** -> `SUPABASE_DIRECT_DATABASE_URL`
 
-The default `DATABASE_URL=sqlite:///data/trading_agent.sqlite` is for the app’s local SQLite storage. Do not paste the Supabase direct connection string into `DATABASE_URL` unless a Postgres persistence implementation is added.
+Use one of these:
 
-`RISK_SERVICE_URL` is not from Supabase. It is only for the optional Go service in `services/risk-go`.
+- `STORAGE_BACKEND=sqlite`: default local SQLite storage.
+- `STORAGE_BACKEND=supabase_rest`: set `SUPABASE_URL` + `SUPABASE_SECRET_KEY`, then run `deployment/supabase_schema.sql` in Supabase SQL Editor.
+- `STORAGE_BACKEND=supabase_postgres`: set `SUPABASE_DIRECT_DATABASE_URL`; the app can auto-create tables.
+- `STORAGE_BACKEND=none`: no DB persistence.
+
+The default `DATABASE_URL=sqlite:///data/trading_agent.sqlite` is only for SQLite mode.
+
+`RISK_SERVICE_URL` is not from Supabase. It is only for the optional Go service in `services/risk-go`. If you do not deploy that separate service, leave it blank.
 
 ## Notes
 

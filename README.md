@@ -317,12 +317,13 @@ Do not commit `.env`, API keys, Telegram bot tokens, GitHub tokens, Supabase ser
 | `BITGET_API_SECRET` | Live only | empty | Bitget API secret |
 | `BITGET_API_PASSWORD` | Live only | empty | Bitget API passphrase/password |
 | `BITGET_SANDBOX` | Optional | `false` | Enables Bitget sandbox mode when supported |
-| `DATABASE_URL` | Optional | `sqlite:///data/trading_agent.sqlite` | Local app DB URL. Keep SQLite unless a PostgreSQL persistence layer is wired |
+| `STORAGE_BACKEND` | Optional | `sqlite` | `sqlite`, `supabase_rest`, `supabase_postgres`, or `none` |
+| `DATABASE_URL` | Optional | `sqlite:///data/trading_agent.sqlite` | Local SQLite DB URL used when `STORAGE_BACKEND=sqlite` |
 | `SUPABASE_URL` | Optional | empty | Supabase Project URL / API URL |
 | `SUPABASE_PUBLISHABLE_KEY` | Optional | empty | Supabase publishable/anon key; mainly for frontend clients |
 | `SUPABASE_SECRET_KEY` | Optional | empty | Supabase secret/service-role key for server-side REST persistence |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional | empty | Backward-compatible alias for `SUPABASE_SECRET_KEY` |
-| `SUPABASE_DIRECT_DATABASE_URL` | Optional | empty | Supabase direct Postgres connection string; not the same as `DATABASE_URL` in the default bot |
+| `SUPABASE_DIRECT_DATABASE_URL` | Optional | empty | Supabase direct Postgres connection string used when `STORAGE_BACKEND=supabase_postgres` |
 | `RISK_SERVICE_URL` | Optional | empty | Optional Go risk service URL if `services/risk-go` is deployed separately |
 | `AUDIT_LOG_PATH` | Optional | `logs/audit.jsonl` | Append-only local audit log |
 | `LOG_LEVEL` | Optional | `INFO` | Python logging level |
@@ -336,9 +337,16 @@ Supabase has several different values that look similar. Use them like this:
 | Project URL / API URL | `SUPABASE_URL` | Optional | Looks like `https://your-project.supabase.co` |
 | Publishable key / anon key | `SUPABASE_PUBLISHABLE_KEY` | Usually no | Mainly for browser/frontend clients |
 | Secret key / service_role key | `SUPABASE_SECRET_KEY` | Yes, if using Supabase REST storage | Server-side only. Do not expose in frontend code |
-| Direct connection string | `SUPABASE_DIRECT_DATABASE_URL` | Not by default | Direct Postgres URL. Kept separate from the default SQLite `DATABASE_URL` |
+| Direct connection string | `SUPABASE_DIRECT_DATABASE_URL` | Yes, if `STORAGE_BACKEND=supabase_postgres` | Direct Postgres URL. The bot can auto-create required tables |
 
-`RISK_SERVICE_URL` is unrelated to Supabase. Leave it blank unless you deploy the optional Go risk microservice in `services/risk-go`; then set it to that service’s internal URL.
+Persistence options:
+
+- `STORAGE_BACKEND=sqlite`: uses `DATABASE_URL=sqlite:///data/trading_agent.sqlite`.
+- `STORAGE_BACKEND=supabase_rest`: uses `SUPABASE_URL` + `SUPABASE_SECRET_KEY`; run `deployment/supabase_schema.sql` once in Supabase SQL Editor.
+- `STORAGE_BACKEND=supabase_postgres`: uses `SUPABASE_DIRECT_DATABASE_URL`; the bot can auto-create the tables.
+- `STORAGE_BACKEND=none`: disables database persistence.
+
+`RISK_SERVICE_URL` is unrelated to Supabase. Leave it blank unless you deploy the optional Go risk microservice in `services/risk-go`; then set it to that service’s URL from Render. See `deployment/risk-service-render.md`.
 
 ---
 
@@ -372,6 +380,7 @@ BITGET_API_PASSWORD=
 BITGET_SANDBOX=false
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
+STORAGE_BACKEND=sqlite
 SUPABASE_URL=
 SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=
@@ -408,6 +417,7 @@ BITGET_API_PASSWORD=
 BITGET_SANDBOX=false
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
+STORAGE_BACKEND=sqlite
 SUPABASE_URL=
 SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=
@@ -444,6 +454,7 @@ BITGET_API_PASSWORD=replace_with_sandbox_passphrase
 BITGET_SANDBOX=true
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
+STORAGE_BACKEND=sqlite
 SUPABASE_URL=
 SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=
@@ -480,6 +491,7 @@ BITGET_API_PASSWORD=replace_with_live_passphrase
 BITGET_SANDBOX=false
 
 DATABASE_URL=sqlite:///data/trading_agent.sqlite
+STORAGE_BACKEND=sqlite
 SUPABASE_URL=
 SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SECRET_KEY=
@@ -516,6 +528,7 @@ BITGET_API_PASSWORD=
 BITGET_SANDBOX=false
 
 DATABASE_URL=
+STORAGE_BACKEND=supabase_rest
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=replace_with_publishable_or_anon_key
 SUPABASE_SECRET_KEY=replace_with_secret_or_service_role_key

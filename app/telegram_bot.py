@@ -24,6 +24,7 @@ from app.core.universe import resolve_universe, universe_menu
 from app.exchanges.base import Exchange
 from app.exchanges.bitget import BitgetExchange
 from app.exchanges.paper import PaperExchange
+from app.storage.factory import build_trade_store
 
 
 def build_application(settings: Settings) -> Application:
@@ -53,6 +54,7 @@ def build_application(settings: Settings) -> Application:
         exchange = PaperExchange()
 
     audit = AuditJournal(settings.audit_log_path)
+    trade_store = build_trade_store(settings)
     approval_book = ApprovalBook(expiry_minutes=settings.approval_expiry_minutes)
     risk_engine = RiskEngine(
         RiskConfig(
@@ -67,7 +69,13 @@ def build_application(settings: Settings) -> Application:
             require_stop_loss=settings.require_stop_loss,
         )
     )
-    execution_engine = ExecutionEngine(exchange, approval_book, settings.approval_required, audit)
+    execution_engine = ExecutionEngine(
+        exchange,
+        approval_book,
+        settings.approval_required,
+        audit,
+        trade_store,
+    )
     strategy = MultiFactorStrategy()
     research = InstitutionalResearchEngine()
     scanner = MarketScanner(exchange, research)
@@ -84,6 +92,7 @@ def build_application(settings: Settings) -> Application:
     app.bot_data["settings"] = settings
     app.bot_data["exchange"] = exchange
     app.bot_data["audit"] = audit
+    app.bot_data["trade_store"] = trade_store
     app.bot_data["approval_book"] = approval_book
     app.bot_data["risk_engine"] = risk_engine
     app.bot_data["execution_engine"] = execution_engine

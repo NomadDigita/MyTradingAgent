@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from app.core.audit import AuditJournal
 from app.core.models import ExecutionResult, TradePlan
 from app.exchanges.base import Exchange
+from app.storage.base import NullTradeStore, TradeStore
 
 
 @dataclass
@@ -47,18 +48,22 @@ class ExecutionEngine:
         approval_book: ApprovalBook,
         approval_required: bool,
         audit: AuditJournal | None = None,
+        store: TradeStore | None = None,
     ) -> None:
         self.exchange = exchange
         self.approval_book = approval_book
         self.approval_required = approval_required
         self.audit = audit
+        self.store = store or NullTradeStore()
 
     async def submit(self, plan: TradePlan) -> ExecutionResult | str:
+        await self._save_plan(plan)
         if self.approval_required:
             approval_id = self.approval_book.add(plan)
             self._record("approval_created", {"approval_id": approval_id, "plan": plan})
             return approval_id
         result = await self.exchange.create_order(plan)
+        await self._save_execution(None, result, "order_executed_without_approval")
         self._record("order_executed_without_approval", {"plan": plan, "result": result})
         return result
 
@@ -68,6 +73,7 @@ class ExecutionEngine:
             self._record("approval_missing_or_expired", {"approval_id": approval_id})
             return None
         result = await self.exchange.create_order(plan)
+        await self._save_execution(approval_id, result, "approval_executed")
         self._record("approval_executed", {"approval_id": approval_id, "plan": plan, "result": result})
         return result
 
@@ -79,3 +85,20 @@ class ExecutionEngine:
     def _record(self, event_type: str, payload: dict) -> None:
         if self.audit is not None:
             self.audit.record(event_type, payload)
+
+    async def _save_plan(self, plan: TradePlan) -> None:
+        try:
+            await self.store.save_plan(plan)
+        except Exception as exc:  # noqa: BLE001
+            self._record("storage_save_plan_failed", {"approval_id": plan.approval_id, "error": str(exc)})
+
+    async def _save_execution(
+        self,
+        approval_id: str | None,
+        result: ExecutionResult,
+        event_type: str,
+    ) -> None:
+        try:
+            await self.store.save_execution(approval_id, result, event_type)
+        except Exception as exc:  # noqa: BLE001
+            self._record("storage_save_execution_failed", {"approval_id": approval_id, "error": str(exc)})
